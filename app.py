@@ -4,18 +4,14 @@ import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, firestore
 import google.generativeai as genai
-import bcrypt  # <-- This is our new, reliable password library
+import bcrypt
 
 # --- 1. PAGE CONFIGURATION ---
-# The theme is now set in your new .streamlit/config.toml file
 st.set_page_config(page_title="NutriPlan AI", page_icon="🧑‍⚕️", layout="wide")
 
 # --- 2. FIREBASE & GOOGLE AI INITIALIZATION ---
 
 # Initialize Firebase
-# --- START: NEW FIREBASE INIT ---
-
-# Define the database URL (from your firebase project)
 DATABASE_URL = "https://aiml-pbl-default-rtdb.firebaseio.com/"
 
 try:
@@ -27,6 +23,13 @@ except ValueError:
         # 1. Check if credentials are in Streamlit secrets (for deployment)
         if 'firebase' in st.secrets:
             creds_dict = dict(st.secrets["firebase"])
+            
+            # --- START: BUG FIX #1 (The Crash) ---
+            # Fix the private_key format (replace literal '\n' with actual newlines)
+            if 'private_key' in creds_dict:
+                creds_dict['private_key'] = creds_dict['private_key'].replace('\\n', '\n')
+            # --- END: BUG FIX #1 ---
+
             cred = credentials.Certificate(creds_dict)
         else:
             # 2. If not, check for the local file (for local testing)
@@ -52,7 +55,12 @@ db = firestore.client()
 # Initialize Google Generative AI
 try:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-    model = genai.GenerativeModel('gemini-2.5-pro')
+    
+    # --- START: BUG FIX #2 (Future Crash) ---
+    # Model 'gemini-2.5-pro' does not exist. Using 'gemini-1.5-pro'.
+    model = genai.GenerativeModel('gemini-1.5-pro')
+    # --- END: BUG FIX #2 ---
+
 except Exception as e:
     st.error("Google AI initialization error. Please check your API key in Streamlit secrets.")
     st.stop()
@@ -66,7 +74,6 @@ if 'user_profile' not in st.session_state:
     st.session_state['user_profile'] = {}
 
 # --- 4. PASSWORD HASHING & CHECKING ---
-# These are our new, reliable functions
 def hash_password(password):
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
@@ -81,58 +88,61 @@ def run_app():
         st.title("Welcome to 🧑‍⚕️ NutriPlan AI")
         st.markdown("Your intelligent partner for personalized meal planning.")
         
-        choice = st.selectbox("Login or Sign Up", ["Login", "Sign Up"], label_visibility="collapsed")
-
-        if choice == "Login":
-            st.subheader("Login to Your Account")
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-
-            if st.button("Login", type="primary"):
-                user_ref = db.collection("users").document(username).get()
-                if user_ref.exists:
-                    user_data = user_ref.to_dict()
-                    # Use our new, reliable check_password function
-                    if check_password(password, user_data['password_hash']):
-                        st.session_state['logged_in'] = True
-                        st.session_state['username'] = username
-                        st.session_state['user_profile'] = user_data
-                        st.rerun()
-                    else:
-                        st.error("Incorrect username or password.")
-                else:
-                    st.error("Incorrect username or password.")
+        # Use columns for a cleaner layout
+        col1, col2 = st.columns([1, 1])
         
-        elif choice == "Sign Up":
-            st.subheader("Create a New Account")
-            new_name = st.text_input("Your Name")
-            new_username = st.text_input("Choose a Username")
-            new_password = st.text_input("Choose a Password", type="password")
+        with col1:
+            choice = st.radio("Choose Action", ["Login", "Sign Up"], horizontal=True)
+            
+            if choice == "Login":
+                st.subheader("Login")
+                with st.form("login_form"):
+                    username = st.text_input("Username")
+                    password = st.text_input("Password", type="password")
+                    if st.form_submit_button("Login", type="primary"):
+                        user_ref = db.collection("users").document(username).get()
+                        if user_ref.exists:
+                            user_data = user_ref.to_dict()
+                            if check_password(password, user_data['password_hash']):
+                                st.session_state['logged_in'] = True
+                                st.session_state['username'] = username
+                                st.session_state['user_profile'] = user_data
+                                st.rerun()
+                            else:
+                                st.error("Incorrect username or password.")
+                        else:
+                            st.error("Incorrect username or password.")
+            
+            elif choice == "Sign Up":
+                st.subheader("Create Account")
+                with st.form("signup_form"):
+                    new_name = st.text_input("Your Name")
+                    new_username = st.text_input("Choose a Username")
+                    new_password = st.text_input("Choose a Password", type="password")
+                    
+                    if st.form_submit_button("Sign Up", type="primary"):
+                        if not new_name or not new_username or not new_password:
+                            st.warning("Please fill out all fields.")
+                        else:
+                            user_ref = db.collection("users").document(new_username).get()
+                            if user_ref.exists:
+                                st.error("Username already taken. Please choose another.")
+                            else:
+                                hashed_password = hash_password(new_password)
+                                user_data = {
+                                    "name": new_name,
+                                    "username": new_username,
+                                    "password_hash": hashed_password,
+                                    "age": None, "height": None, "weight": None, "country": "",
+                                    "cuisine": "", "food_availability": "", "goals": [], 
+                                    "health_issues": "", "feedback": []
+                                }
+                                db.collection("users").document(new_username).set(user_data)
+                                st.success("Account created successfully! Please login.")
+                                st.balloons()
+        with col2:
+            st.image("https://i.imgur.com/g0L6E8W.png", use_column_width=True) # Adding a decorative image
 
-            if st.button("Sign Up", type="primary"):
-                if not new_name or not new_username or not new_password:
-                    st.warning("Please fill out all fields.")
-                else:
-                    user_ref = db.collection("users").document(new_username).get()
-                    if user_ref.exists:
-                        st.error("Username already taken. Please choose another.")
-                    else:
-                        # Use our new, reliable hash_password function
-                        hashed_password = hash_password(new_password)
-                        user_data = {
-                            "name": new_name,
-                            "username": new_username, # We will use this as the document ID
-                            "password_hash": hashed_password,
-                            # Initialize all profile fields as requested
-                            "age": None, "height": None, "weight": None, "country": "",
-                            "cuisine": "", "food_availability": "", "goals": [], 
-                            "health_issues": "", "feedback": []
-                        }
-                        # Save the new user in the "users" collection with their username as the key
-                        db.collection("users").document(new_username).set(user_data)
-                        st.success("Account created successfully! Please login.")
-                        st.balloons()
-    
     # --- B. MAIN APPLICATION VIEW (AFTER LOGIN) ---
     else:
         st.sidebar.header(f"Welcome, {st.session_state['user_profile']['name']}!")
