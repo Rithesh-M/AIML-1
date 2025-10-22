@@ -1,5 +1,5 @@
 # app.py
-
+import os
 import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -13,13 +13,38 @@ st.set_page_config(page_title="NutriPlan AI", page_icon="🧑‍⚕️", layout=
 # --- 2. FIREBASE & GOOGLE AI INITIALIZATION ---
 
 # Initialize Firebase
+# --- START: NEW FIREBASE INIT ---
+
+# Define the database URL (from your firebase project)
+DATABASE_URL = "https://aiml-pbl-default-rtdb.firebaseio.com/"
+
 try:
-    if not firebase_admin._apps:
-        cred = credentials.Certificate("firebase-key.json")
-        firebase_admin.initialize_app(cred)
-except Exception as e:
-    st.error("Firebase initialization error. Please check your `firebase-key.json` file.")
-    st.stop()
+    # Try to get the app, if it's already initialized
+    app = firebase_admin.get_app()
+except ValueError:
+    # If not initialized, try to initialize it
+    try:
+        # 1. Check if credentials are in Streamlit secrets (for deployment)
+        if 'firebase' in st.secrets:
+            creds_dict = dict(st.secrets["firebase"])
+            cred = credentials.Certificate(creds_dict)
+        else:
+            # 2. If not, check for the local file (for local testing)
+            if os.path.exists("firebase-key.json"):
+                cred = credentials.Certificate("firebase-key.json")
+            else:
+                raise FileNotFoundError("Firebase credentials not found. Please add 'firebase-key.json' or set st.secrets['firebase'].")
+
+        # Initialize the Firebase app
+        firebase_admin.initialize_app(cred, {'databaseURL': DATABASE_URL})
+
+    except FileNotFoundError as e:
+        st.error(e)
+        st.stop()
+    except Exception as e:
+        st.error(f"Firebase initialization error: {e}")
+        st.stop()
+# --- END: NEW FIREBASE INIT ---
 
 # Initialize Firestore database
 db = firestore.client()
